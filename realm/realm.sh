@@ -6,7 +6,6 @@ DIR=/opt/realm-manager
 CONFIG=$DIR/config.toml
 BIN=$DIR/realm
 UNIT=/etc/systemd/system/realm-manager.service
-VERSION=v2.9.6
 
 die() { echo "错误：$*" >&2; return 1; }
 need_root() { [[ ${EUID:-$(id -u)} -eq 0 ]] || die '请使用 root 或 sudo 运行。'; }
@@ -22,9 +21,34 @@ install_realm() {
     x86_64) arch=x86_64;; aarch64|arm64) arch=aarch64;; *) die '仅支持 x86_64 和 aarch64。'; return;;
   esac
   if [[ -e $UNIT || -e $BIN ]]; then die '已存在本工具的安装；为保护现有数据，请先卸载。'; return; fi
-  local tmp url
+  local tmp url version asset
   tmp=$(mktemp -d) || return
-  url="https://github.com/zhboner/realm/releases/download/$VERSION/realm-${arch}-unknown-linux-musl.tar.gz"
+  asset="realm-${arch}-unknown-linux-musl.tar.gz"
+  if ! curl -fLsS --retry 3 -H 'Accept: application/vnd.github+json' \
+    -o "$tmp/release.json" 'https://api.github.com/repos/zhboner/realm/releases/latest'; then
+    rm -rf "$tmp"; die '无法获取 Realm 最新稳定版信息，请检查网络或 GitHub API 限流。'; return
+  fi
+  if ! python3 - "$tmp/release.json" "$asset" "$tmp/metadata" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], encoding='utf-8') as f:
+        release = json.load(f)
+    version = release['tag_name']
+    asset = next(item for item in release['assets'] if item['name'] == sys.argv[2])
+    url = asset['browser_download_url']
+    if not isinstance(version, str) or not version or '\n' in version:
+        raise ValueError('invalid version')
+    if not isinstance(url, str) or not url.startswith('https://github.com/zhboner/realm/releases/download/') or '\n' in url:
+        raise ValueError('invalid download URL')
+    with open(sys.argv[3], 'w', encoding='utf-8') as f:
+        f.write(version + '\n' + url + '\n')
+except (OSError, ValueError, KeyError, TypeError, StopIteration) as exc:
+    print(f'最新版本信息无效或缺少对应架构的安装包: {exc}', file=sys.stderr)
+    sys.exit(1)
+PY
+  then rm -rf "$tmp"; return 1; fi
+  { IFS= read -r version; IFS= read -r url; } < "$tmp/metadata"
+  echo "正在下载 Realm 最新稳定版：$version ($arch)"
   if ! curl -fL --retry 3 -o "$tmp/realm.tar.gz" "$url" || ! tar -xzf "$tmp/realm.tar.gz" -C "$tmp" realm || [[ ! -f $tmp/realm ]]; then
     rm -rf "$tmp"; die '下载或解压失败。'; return
   fi
