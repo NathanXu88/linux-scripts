@@ -37,6 +37,7 @@ check_dependencies() {
 }
 
 install_realm() {
+  local tmp url version asset arch
   need_root || return
   command -v systemctl >/dev/null && [[ -d /run/systemd/system ]] || { die '需要使用 systemd 的 Linux 系统。'; return; }
   check_dependencies || return
@@ -44,7 +45,6 @@ install_realm() {
     x86_64) arch=x86_64;; aarch64|arm64) arch=aarch64;; *) die '仅支持 x86_64 和 aarch64。'; return;;
   esac
   if [[ -e $UNIT || -e $BIN ]]; then die '已存在本工具的安装；为保护现有数据，请先卸载。'; return; fi
-  local tmp url version asset arch
   tmp=$(mktemp -d) || return
   asset="realm-${arch}-unknown-linux-musl.tar.gz"
   if ! curl -fLsS --retry 3 -H 'Accept: application/vnd.github+json' \
